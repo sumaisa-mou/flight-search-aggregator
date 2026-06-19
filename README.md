@@ -1,59 +1,121 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Flight Aggregator API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Small Laravel service for the iBox Lab senior backend take-home. One search query, three mock providers with completely different JSON shapes, one unified response. Plus a tiny booking endpoint that stores a flight snapshot and hands back a public reference.
 
-## About Laravel
+Architecture notes and trade-offs are in `ARCHITECTURE.md`. This file is just enough to get it running.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Stack
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+PHP 8.3, Laravel 12, MySQL for bookings, Redis for short-TTL search caching, Spatie `laravel-data` for the canonical DTOs, PHPUnit for the test suite.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Getting it running
 
-## Learning Laravel
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Then set the database + cache config in `.env`:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```env
+APP_TIMEZONE=UTC
+DB_CONNECTION=mysql
+DB_DATABASE=flight_aggregator
+DB_USERNAME=root
+DB_PASSWORD=
+CACHE_STORE=redis
+```
 
-## Laravel Sponsors
+Create the database and run the booking migration:
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```bash
+mysql -u root -e "CREATE DATABASE flight_aggregator;"
+php artisan migrate
+php artisan serve
+```
 
-### Premium Partners
+Redis just needs to be running locally — `brew services start redis` on macOS. If Redis is down, search still works, every request just hits the providers cold. Caching is optimization, not correctness.
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+The three mock providers are served from this same app under `/mock/provider-a`, `/mock/provider-b`, `/mock/provider-c`, so a single `php artisan serve` is enough to run everything.
 
-## Contributing
+## Running the tests
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+php artisan test
+```
 
-## Code of Conduct
+Tests use sqlite `:memory:` and the `array` cache driver, so you don't need MySQL or Redis just to run the suite.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## The endpoints
 
-## Security Vulnerabilities
+### Search
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```
+GET /api/flights/search?from=DAC&to=DXB&date=2026-07-01&passengers=2
+```
 
-## License
+Optional: `sort=price|duration|departure` (defaults to price), `maxStops=0`, `carrier=EK`.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+curl "http://localhost:8000/api/flights/search?from=DAC&to=DXB&date=2026-07-01&passengers=2"
+```
+
+You get back `data` (deduplicated, sorted flights) and `meta` reporting per-provider status plus a `complete` flag. `complete: false` means at least one provider failed or timed out, but the survivors still made it into `data`. Prices are integer minor units — `39900` is $399.00.
+
+### Create a booking
+
+```
+POST /api/bookings
+```
+
+```bash
+curl -X POST http://localhost:8000/api/bookings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "flight_id": "abc123",
+    "carrier": "EK",
+    "flight_number": "EK585",
+    "origin": "DAC",
+    "destination": "DXB",
+    "departure_at": "2026-07-01T03:45:00+00:00",
+    "arrival_at": "2026-07-01T06:50:00+00:00",
+    "stops": 0,
+    "price": { "amount": 39900, "currency": "USD" },
+    "source": "b",
+    "passengers": [
+      { "name": "Mou Sumaisa", "passport": "BD1234567" }
+    ]
+  }'
+```
+
+Returns `201` with a `BKG-XXXXXX` reference. Validation lives in `StoreBookingRequest` — bad input gets `422` with field errors.
+
+### Fetch a booking
+
+```
+GET /api/bookings/{reference}
+```
+
+```bash
+curl http://localhost:8000/api/bookings/BKG-XXXXXX
+```
+
+`404` if the reference doesn't exist.
+
+## Where things live
+
+```
+app/
+  Http/Controllers/   FlightSearchController, BookingController, MockProviderController
+  Http/Requests/      SearchFlightsRequest, StoreBookingRequest
+  Http/Resources/     FlightSearchResource, FlightResource, BookingResource
+  Services/           FlightSearchService, FlightAggregator, FlightDeduplicator
+  Providers/Flight/   FlightProviderInterface + ProviderA/B/CAdapter
+  Data/               NormalizedFlight, SearchCriteria, Money, AggregatedResult, SearchResult
+  Models/             Booking
+config/flights.php    provider URLs, per-provider timeouts, cache TTL
+tests/Fixtures/       raw provider JSON used by adapter + feature tests
+```
+
+That's it. Read `ARCHITECTURE.md` for why any of this looks the way it does.
