@@ -2,20 +2,20 @@
 
 namespace App\Http\Resources;
 
-use App\Data\NormalizedFlight;
 use App\Data\AlternativeOffer;
+use App\Data\DedupedFlight;
 use DateTimeImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @property NormalizedFlight $resource
+ * @property DedupedFlight $resource
  */
 class FlightResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $flight = $this->resource;
+        $flight = $this->resource->primary;
 
         return [
             'id' => $flight->id,
@@ -40,7 +40,7 @@ class FlightResource extends JsonResource
                         'currency' => $offer->price->currency,
                     ],
                 ],
-                $flight->alternatives,
+                $this->resource->alternatives,
             ),
         ];
     }

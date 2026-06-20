@@ -3,13 +3,14 @@
 namespace App\Services;
 
 use App\Data\AlternativeOffer;
+use App\Data\DedupedFlight;
 use App\Data\NormalizedFlight;
 
 class FlightDeduplicator
 {
     /**
      * @param  NormalizedFlight[]  $flights
-     * @return NormalizedFlight[]
+     * @return DedupedFlight[]
      */
     public function dedupe(array $flights): array
     {
@@ -30,7 +31,7 @@ class FlightDeduplicator
                 array_slice($group, 1),
             );
 
-            $result[] = $primary->withAlternatives($alternatives);
+            $result[] = new DedupedFlight(primary: $primary, alternatives: $alternatives);
         }
 
         return $result;

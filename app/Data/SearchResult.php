@@ -5,7 +5,7 @@ namespace App\Data;
 final readonly class SearchResult
 {
     /**
-     * @param  NormalizedFlight[]  $flights
+     * @param  DedupedFlight[]  $flights
      * @param  array<int, array{name: string, status: string, count: int}>  $providerStatuses
      */
     public function __construct(

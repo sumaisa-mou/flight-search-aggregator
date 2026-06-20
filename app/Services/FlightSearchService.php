@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Data\NormalizedFlight;
+use App\Data\DedupedFlight;
 use App\Data\SearchCriteria;
 use App\Data\SearchResult;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +23,7 @@ class FlightSearchService
             function () use ($criteria) {
                 $result = $this->aggregator->fetch($criteria);
                 $deduped = $this->deduplicator->dedupe($result->flights);
-                $this->snapshotStore->putMany($deduped);
+                $this->snapshotStore->putMany(array_map(fn (DedupedFlight $d) => $d->primary, $deduped));
 
                 return [
                     'flights' => $deduped,
@@ -39,33 +39,33 @@ class FlightSearchService
     }
 
     /**
-     * @param  NormalizedFlight[]  $flights
-     * @return NormalizedFlight[]
+     * @param  DedupedFlight[]  $flights
+     * @return DedupedFlight[]
      */
     private function applyFilters(array $flights, SearchCriteria $criteria): array
     {
         if ($criteria->maxStops !== null) {
-            $flights = array_filter($flights, fn (NormalizedFlight $f) => $f->stops <= $criteria->maxStops);
+            $flights = array_filter($flights, fn (DedupedFlight $f) => $f->primary->stops <= $criteria->maxStops);
         }
 
         if ($criteria->carrier !== null) {
             $carrier = strtoupper($criteria->carrier);
-            $flights = array_filter($flights, fn (NormalizedFlight $f) => $f->carrier === $carrier);
+            $flights = array_filter($flights, fn (DedupedFlight $f) => $f->primary->carrier === $carrier);
         }
 
         return array_values($flights);
     }
 
     /**
-     * @param  NormalizedFlight[]  $flights
-     * @return NormalizedFlight[]
+     * @param  DedupedFlight[]  $flights
+     * @return DedupedFlight[]
      */
     private function applySort(array $flights, SearchCriteria $criteria): array
     {
         $comparator = match ($criteria->sort) {
-            'duration' => fn (NormalizedFlight $a, NormalizedFlight $b) => $a->durationInMinutes() <=> $b->durationInMinutes(),
-            'departure' => fn (NormalizedFlight $a, NormalizedFlight $b) => $a->departureAt <=> $b->departureAt,
-            default => fn (NormalizedFlight $a, NormalizedFlight $b) => $a->price->amount <=> $b->price->amount,
+            'duration' => fn (DedupedFlight $a, DedupedFlight $b) => $a->primary->durationInMinutes() <=> $b->primary->durationInMinutes(),
+            'departure' => fn (DedupedFlight $a, DedupedFlight $b) => $a->primary->departureAt <=> $b->primary->departureAt,
+            default => fn (DedupedFlight $a, DedupedFlight $b) => $a->primary->price->amount <=> $b->primary->price->amount,
         };
 
         usort($flights, $comparator);
