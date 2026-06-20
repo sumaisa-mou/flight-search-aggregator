@@ -9,7 +9,7 @@ The API does two things:
 
 The focus is on API design, separation of concerns, and a backend that is easy to extend.
 
-For the reasoning behind the design, trade-offs, and future work, see `ARCHITECTURE.md`.
+For the reasoning behind the design, trade-offs, and future work, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Stack
 
