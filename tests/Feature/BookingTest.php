@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Booking;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 final class BookingTest extends TestCase
@@ -12,7 +14,9 @@ final class BookingTest extends TestCase
 
     public function test_store_creates_booking_and_returns_reference(): void
     {
-        $response = $this->postJson('/api/bookings', $this->validPayload());
+        $flightId = $this->searchAndPickFlightId('EK585');
+
+        $response = $this->postJson('/api/bookings', $this->validPayload($flightId));
 
         $response->assertCreated()
             ->assertJsonStructure([
@@ -25,6 +29,7 @@ final class BookingTest extends TestCase
             ])
             ->assertJsonPath('data.flight.carrier', 'EK')
             ->assertJsonPath('data.flight.flightNumber', 'EK585')
+            ->assertJsonPath('data.flight.id', $flightId)
             ->assertJsonPath('data.flight.price.amount', 39900);
 
         $this->assertStringStartsWith('BKG-', $response->json('data.reference'));
@@ -33,7 +38,8 @@ final class BookingTest extends TestCase
 
     public function test_round_trip_returns_same_booking_by_reference(): void
     {
-        $created = $this->postJson('/api/bookings', $this->validPayload());
+        $flightId = $this->searchAndPickFlightId('EK585');
+        $created = $this->postJson('/api/bookings', $this->validPayload($flightId));
         $reference = $created->json('data.reference');
 
         $fetched = $this->getJson("/api/bookings/{$reference}");
@@ -54,46 +60,60 @@ final class BookingTest extends TestCase
         $this->postJson('/api/bookings', [])->assertStatus(422);
     }
 
-    public function test_rejects_payload_with_arrival_before_departure(): void
+    public function test_returns_410_when_flight_snapshot_is_missing(): void
     {
-        $payload = $this->validPayload();
-        $payload['arrival_at'] = '2026-07-01T02:00:00+00:00';
-        $payload['departure_at'] = '2026-07-01T03:45:00+00:00';
+        Cache::flush();
 
-        $this->postJson('/api/bookings', $payload)
-            ->assertStatus(422)
-            ->assertJsonValidationErrors(['arrival_at']);
+        $this->postJson('/api/bookings', $this->validPayload('missing-flight-id'))
+            ->assertStatus(410);
     }
 
-    public function test_lowercases_input_is_normalized_to_uppercase(): void
+    public function test_client_cannot_override_server_flight_snapshot(): void
     {
-        $payload = $this->validPayload();
-        $payload['carrier'] = 'ek';
-        $payload['origin'] = 'dac';
+        $flightId = $this->searchAndPickFlightId('EK585');
+        $payload = $this->validPayload($flightId);
+        $payload['carrier'] = 'ZZ';
+        $payload['price'] = ['amount' => 1, 'currency' => 'EUR'];
 
         $response = $this->postJson('/api/bookings', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('data.flight.carrier', 'EK')
-            ->assertJsonPath('data.flight.origin', 'DAC');
+            ->assertJsonPath('data.flight.price.amount', 39900)
+            ->assertJsonPath('data.flight.price.currency', 'USD');
     }
 
-    private function validPayload(): array
+    private function validPayload(string $flightId): array
     {
         return [
-            'flight_id' => 'abc123',
-            'carrier' => 'EK',
-            'flight_number' => 'EK585',
-            'origin' => 'DAC',
-            'destination' => 'DXB',
-            'departure_at' => '2026-07-01T03:45:00+00:00',
-            'arrival_at' => '2026-07-01T06:50:00+00:00',
-            'stops' => 0,
-            'price' => ['amount' => 39900, 'currency' => 'USD'],
-            'source' => 'b',
+            'flight_id' => $flightId,
             'passengers' => [
                 ['name' => 'Mou Sumaisa', 'passport' => 'BD1234567'],
             ],
         ];
+    }
+
+    private function searchAndPickFlightId(string $flightNumber): string
+    {
+        Cache::flush();
+        $this->fakeProvidersFromMockRoutes();
+
+        $response = $this->getJson('/api/flights/search?from=DAC&to=DXB&date=2026-07-01&passengers=2');
+
+        $flight = collect($response->json('data'))
+            ->firstWhere('flightNumber', $flightNumber);
+
+        $this->assertNotNull($flight);
+
+        return $flight['id'];
+    }
+
+    private function fakeProvidersFromMockRoutes(): void
+    {
+        Http::fake([
+            '*provider-a*' => Http::response($this->getJson('/mock/provider-a')->json(), 200),
+            '*provider-b*' => Http::response($this->getJson('/mock/provider-b')->json(), 200),
+            '*provider-c*' => Http::response($this->getJson('/mock/provider-c')->json(), 200),
+        ]);
     }
 }

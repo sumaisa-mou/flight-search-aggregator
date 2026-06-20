@@ -5,27 +5,34 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreBookingRequest;
 use App\Http\Resources\BookingResource;
 use App\Models\Booking;
+use App\Services\FlightSnapshotStore;
 use Illuminate\Http\JsonResponse;
+use Symfony\Component\HttpKernel\Exception\GoneHttpException;
 
 class BookingController extends Controller
 {
-    public function store(StoreBookingRequest $request): JsonResponse
+    public function store(StoreBookingRequest $request, FlightSnapshotStore $snapshotStore): JsonResponse
     {
         $data = $request->validated();
+        $flight = $snapshotStore->get($data['flight_id']);
+
+        if ($flight === null) {
+            throw new GoneHttpException('Flight snapshot expired or was not found. Search again.');
+        }
 
         $booking = Booking::create([
             'reference' => Booking::generateReference(),
-            'flight_id' => $data['flight_id'],
-            'carrier' => strtoupper($data['carrier']),
-            'flight_number' => strtoupper($data['flight_number']),
-            'origin' => strtoupper($data['origin']),
-            'destination' => strtoupper($data['destination']),
-            'departure_at' => $data['departure_at'],
-            'arrival_at' => $data['arrival_at'],
-            'stops' => $data['stops'],
-            'price_amount' => $data['price']['amount'],
-            'price_currency' => strtoupper($data['price']['currency']),
-            'source' => $data['source'],
+            'flight_id' => $flight->id,
+            'carrier' => $flight->carrier,
+            'flight_number' => $flight->flightNumber,
+            'origin' => $flight->origin,
+            'destination' => $flight->destination,
+            'departure_at' => $flight->departureAt,
+            'arrival_at' => $flight->arrivalAt,
+            'stops' => $flight->stops,
+            'price_amount' => $flight->price->amount,
+            'price_currency' => $flight->price->currency,
+            'source' => $flight->source,
             'passengers' => $data['passengers'],
         ]);
 

@@ -1,14 +1,26 @@
 # Flight Aggregator API
 
-Small Laravel service for the iBox Lab senior backend take-home. One search query, three mock providers with completely different JSON shapes, one unified response. Plus a tiny booking endpoint that stores a flight snapshot and hands back a public reference.
+A small Laravel service that aggregates flight search results from multiple providers and exposes a booking API on top.
 
-Architecture notes and trade-offs are in `ARCHITECTURE.md`. This file is just enough to get it running.
+The API does two things:
+
+- searches multiple flight providers and returns one unified result set
+- creates and retrieves bookings using a stable flight identifier
+
+The focus is on API design, separation of concerns, and a backend that is easy to extend.
+
+For the reasoning behind the design, trade-offs, and future work, see `ARCHITECTURE.md`.
 
 ## Stack
 
-PHP 8.3, Laravel 12, MySQL for bookings, Redis for short-TTL search caching, Spatie `laravel-data` for the canonical DTOs, PHPUnit for the test suite.
+- PHP 8.3
+- Laravel 12
+- MySQL for bookings
+- Redis for short-lived search and booking snapshot cache
+- Spatie `laravel-data` for internal data objects
+- PHPUnit for tests
 
-## Getting it running
+## Run locally
 
 ```bash
 composer install
@@ -16,7 +28,7 @@ cp .env.example .env
 php artisan key:generate
 ```
 
-Then set the database + cache config in `.env`:
+Set the basic environment values:
 
 ```env
 APP_TIMEZONE=UTC
@@ -27,7 +39,7 @@ DB_PASSWORD=
 CACHE_STORE=redis
 ```
 
-Create the database and run the booking migration:
+Create the database, migrate, and start the app:
 
 ```bash
 mysql -u root -e "CREATE DATABASE flight_aggregator;"
@@ -35,87 +47,119 @@ php artisan migrate
 php artisan serve
 ```
 
-Redis just needs to be running locally — `brew services start redis` on macOS. If Redis is down, search still works, every request just hits the providers cold. Caching is optimization, not correctness.
+Redis only powers caching. If Redis is down, search still works, but every request hits the mock providers directly.
 
-The three mock providers are served from this same app under `/mock/provider-a`, `/mock/provider-b`, `/mock/provider-c`, so a single `php artisan serve` is enough to run everything.
+The mock providers are served by the same app under:
 
-## Running the tests
+- `/mock/provider-a`
+- `/mock/provider-b`
+- `/mock/provider-c`
+
+So one `php artisan serve` process is enough to run everything locally.
+
+## Run tests
 
 ```bash
 php artisan test
 ```
 
-Tests use sqlite `:memory:` and the `array` cache driver, so you don't need MySQL or Redis just to run the suite.
+The tests use in-memory sqlite and the array cache driver, so no MySQL or Redis setup is required.
 
-## The endpoints
+## API
 
-### Search
+### Search flights
 
-```
+```http
 GET /api/flights/search?from=DAC&to=DXB&date=2026-07-01&passengers=2
 ```
 
-Optional: `sort=price|duration|departure` (defaults to price), `maxStops=0`, `carrier=EK`.
+Optional query params:
+
+- `sort=price|duration|departure` default is `price`
+- `maxStops=0`
+- `carrier=EK`
+
+Example:
 
 ```bash
 curl "http://localhost:8000/api/flights/search?from=DAC&to=DXB&date=2026-07-01&passengers=2"
 ```
 
-You get back `data` (deduplicated, sorted flights) and `meta` reporting per-provider status plus a `complete` flag. `complete: false` means at least one provider failed or timed out, but the survivors still made it into `data`. Prices are integer minor units — `39900` is $399.00.
+What the response includes:
+
+- one unified `data` array
+- a stable `id` for each logical flight
+- one primary offer per flight
+- `alternatives` when the same flight appears from other providers at different prices
+- `meta.providers` so the client can see which providers succeeded or failed
+- `meta.complete` so the client knows whether the result set is complete
+
+Prices are returned in integer minor units. For example, `39900` means `$399.00`.
 
 ### Create a booking
 
-```
+```http
 POST /api/bookings
 ```
+
+Example:
 
 ```bash
 curl -X POST http://localhost:8000/api/bookings \
   -H "Content-Type: application/json" \
   -d '{
-    "flight_id": "abc123",
-    "carrier": "EK",
-    "flight_number": "EK585",
-    "origin": "DAC",
-    "destination": "DXB",
-    "departure_at": "2026-07-01T03:45:00+00:00",
-    "arrival_at": "2026-07-01T06:50:00+00:00",
-    "stops": 0,
-    "price": { "amount": 39900, "currency": "USD" },
-    "source": "b",
+    "flight_id": "2c19399bc16df54f7d4b0f3386f7f2fe",
     "passengers": [
       { "name": "Mou Sumaisa", "passport": "BD1234567" }
     ]
   }'
 ```
 
-Returns `201` with a `BKG-XXXXXX` reference. Validation lives in `StoreBookingRequest` — bad input gets `422` with field errors.
+Important detail:
+
+- the server does not trust the client to send price, carrier, or timing details
+- the client books using `flight_id`
+- the server looks up the cached flight snapshot from the earlier search and stores that authoritative version
+
+If the snapshot is missing or expired, the API returns `410 Gone` and the client needs to search again.
 
 ### Fetch a booking
 
-```
+```http
 GET /api/bookings/{reference}
 ```
 
+Example:
+
 ```bash
-curl http://localhost:8000/api/bookings/BKG-XXXXXX
+curl http://localhost:8000/api/bookings/BKG-ABC123
 ```
 
-`404` if the reference doesn't exist.
+Returns `404` when the booking reference does not exist.
 
-## Where things live
+## Project layout
 
-```
+```text
 app/
-  Http/Controllers/   FlightSearchController, BookingController, MockProviderController
-  Http/Requests/      SearchFlightsRequest, StoreBookingRequest
-  Http/Resources/     FlightSearchResource, FlightResource, BookingResource
-  Services/           FlightSearchService, FlightAggregator, FlightDeduplicator
-  Providers/Flight/   FlightProviderInterface + ProviderA/B/CAdapter
-  Data/               NormalizedFlight, SearchCriteria, Money, AggregatedResult, SearchResult
-  Models/             Booking
-config/flights.php    provider URLs, per-provider timeouts, cache TTL
-tests/Fixtures/       raw provider JSON used by adapter + feature tests
+  Data/               Canonical data objects
+  Http/Controllers/   Search, booking, and mock provider controllers
+  Http/Requests/      Input validation
+  Http/Resources/     Public API response shaping
+  Models/             Booking model
+  Providers/Flight/   Provider adapters
+  Services/           Aggregation, dedup, search, booking snapshot logic
+
+config/flights.php    Provider URLs, timeouts, cache TTLs, provider timezone
+routes/api.php        Public API routes
+routes/web.php        Mock provider routes
+tests/Feature/        End-to-end API tests
 ```
 
-That's it. Read `ARCHITECTURE.md` for why any of this looks the way it does.
+## Current behavior in plain terms
+
+- Search calls the providers concurrently with `Http::pool()`
+- Provider failures are isolated, so one bad provider does not break the whole response
+- Duplicate flights are collapsed into one logical result
+- The cheapest offer becomes the primary result
+- Other offers for the same flight are returned under `alternatives`
+- Booking is tied to the stable flight identifier, not to client-submitted flight details

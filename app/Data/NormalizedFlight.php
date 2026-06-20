@@ -19,6 +19,7 @@ class NormalizedFlight extends Data
         public readonly int $stops,
         public readonly Money $price,
         public readonly string $source,
+        public readonly array $alternatives = [],
     ) {}
 
     public static function create(
@@ -51,6 +52,26 @@ class NormalizedFlight extends Data
             stops: $stops,
             price: $price,
             source: $source,
+        );
+    }
+
+    /**
+     * @param  AlternativeOffer[]  $alternatives
+     */
+    public function withAlternatives(array $alternatives): self
+    {
+        return new self(
+            id: $this->id,
+            carrier: $this->carrier,
+            flightNumber: $this->flightNumber,
+            origin: $this->origin,
+            destination: $this->destination,
+            departureAt: $this->departureAt,
+            arrivalAt: $this->arrivalAt,
+            stops: $this->stops,
+            price: $this->price,
+            source: $this->source,
+            alternatives: $alternatives,
         );
     }
 

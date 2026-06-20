@@ -12,6 +12,7 @@ class FlightSearchService
     public function __construct(
         private readonly FlightAggregator $aggregator,
         private readonly FlightDeduplicator $deduplicator,
+        private readonly FlightSnapshotStore $snapshotStore,
     ) {}
 
     public function search(SearchCriteria $criteria): SearchResult
@@ -21,19 +22,20 @@ class FlightSearchService
             (int) config('flights.cache.ttl'),
             function () use ($criteria) {
                 $result = $this->aggregator->fetch($criteria);
+                $deduped = $this->deduplicator->dedupe($result->flights);
+                $this->snapshotStore->putMany($deduped);
 
                 return [
-                    'flights' => $result->flights,
+                    'flights' => $deduped,
                     'statuses' => $result->providerStatuses,
                 ];
             },
         );
 
-        $deduped = $this->deduplicator->dedupe($cached['flights']);
-        $deduped = $this->applyFilters($deduped, $criteria);
-        $deduped = $this->applySort($deduped, $criteria);
+        $flights = $this->applyFilters($cached['flights'], $criteria);
+        $flights = $this->applySort($flights, $criteria);
 
-        return new SearchResult($deduped, $cached['statuses']);
+        return new SearchResult($flights, $cached['statuses']);
     }
 
     /**

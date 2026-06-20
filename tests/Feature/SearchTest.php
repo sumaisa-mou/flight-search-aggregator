@@ -69,6 +69,62 @@ final class SearchTest extends TestCase
             ->assertJsonPath('data.0.flightNumber', 'EK585');
     }
 
+    public function test_returns_partial_results_when_a_provider_fails(): void
+    {
+        Http::fake([
+            '*provider-a*' => Http::response($this->getJson('/mock/provider-a')->json(), 200),
+            '*provider-b*' => Http::response(['error' => 'provider unavailable'], 500),
+            '*provider-c*' => Http::response($this->getJson('/mock/provider-c')->json(), 200),
+        ]);
+
+        $response = $this->getJson($this->searchUrl());
+
+        $response->assertOk()
+            ->assertJsonPath('meta.complete', false)
+            ->assertJsonCount(3, 'meta.providers')
+            ->assertJsonPath('meta.providers.0.name', 'a')
+            ->assertJsonPath('meta.providers.0.status', 'ok')
+            ->assertJsonPath('meta.providers.1.name', 'b')
+            ->assertJsonPath('meta.providers.1.status', 'failed')
+            ->assertJsonPath('meta.providers.1.count', 0)
+            ->assertJsonPath('meta.providers.2.name', 'c')
+            ->assertJsonPath('meta.providers.2.status', 'ok')
+            ->assertJsonCount(5, 'data');
+    }
+
+    public function test_dedup_is_stable_even_when_app_timezone_is_not_utc(): void
+    {
+        config(['app.timezone' => 'Asia/Dhaka']);
+        $this->fakeProvidersFromMockRoutes();
+
+        $response = $this->getJson($this->searchUrl());
+
+        $response->assertOk()
+            ->assertJsonCount(6, 'data')
+            ->assertJsonPath('meta.complete', true);
+    }
+
+    public function test_dedup_keeps_cheapest_offer_and_exposes_alternatives(): void
+    {
+        $this->fakeProvidersFromMockRoutes();
+
+        $response = $this->getJson($this->searchUrl(['carrier' => 'EK']));
+        $flight = $response->json('data.0');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.flightNumber', 'EK585')
+            ->assertJsonPath('data.0.source', 'b')
+            ->assertJsonPath('data.0.price.amount', 39900)
+            ->assertJsonCount(2, 'data.0.alternatives')
+            ->assertJsonPath('data.0.alternatives.0.source', 'c')
+            ->assertJsonPath('data.0.alternatives.0.price.amount', 40500)
+            ->assertJsonPath('data.0.alternatives.1.source', 'a')
+            ->assertJsonPath('data.0.alternatives.1.price.amount', 41000);
+
+        $this->assertSame(['c', 'a'], array_column($flight['alternatives'], 'source'));
+    }
+
     private function searchUrl(array $extra = []): string
     {
         $params = array_merge([

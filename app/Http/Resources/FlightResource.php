@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Data\NormalizedFlight;
+use App\Data\AlternativeOffer;
 use DateTimeImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -31,6 +32,16 @@ class FlightResource extends JsonResource
                 'currency' => $flight->price->currency,
             ],
             'source' => $flight->source,
+            'alternatives' => array_map(
+                fn (AlternativeOffer $offer) => [
+                    'source' => $offer->source,
+                    'price' => [
+                        'amount' => $offer->price->amount,
+                        'currency' => $offer->price->currency,
+                    ],
+                ],
+                $flight->alternatives,
+            ),
         ];
     }
 }

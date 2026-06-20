@@ -6,7 +6,8 @@ use App\Data\Money;
 use App\Data\NormalizedFlight;
 use App\Data\SearchCriteria;
 use DateTimeImmutable;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 
 class ProviderCAdapter implements FlightProviderInterface
 {
@@ -15,16 +16,20 @@ class ProviderCAdapter implements FlightProviderInterface
         return 'c';
     }
 
-    public function search(SearchCriteria $criteria): array
+    public function request(Pool $pool, SearchCriteria $criteria): void
     {
-        $flights = Http::timeout(config('flights.providers.c.timeout'))
+        $pool->as($this->name())
+            ->timeout(config('flights.providers.c.timeout'))
             ->get(config('flights.providers.c.url'), [
                 'src' => $criteria->from,
                 'dst' => $criteria->to,
                 'date' => $criteria->date,
-            ])
-            ->throw()
-            ->json('results', []);
+            ]);
+    }
+
+    public function normalize(Response $response): array
+    {
+        $flights = $response->json('results', []);
 
         return array_map(fn (array $f) => NormalizedFlight::create(
             carrier: $f['iata'],

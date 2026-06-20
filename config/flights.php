@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'provider_timezone' => env('FLIGHT_PROVIDER_TIMEZONE', 'UTC'),
     'providers' => [
         'a' => [
             'url' => env('FLIGHT_PROVIDER_A_URL', 'http://localhost:8000/mock/provider-a'),
@@ -13,6 +14,10 @@ return [
         'c' => [
             'url' => env('FLIGHT_PROVIDER_C_URL', 'http://localhost:8000/mock/provider-c'),
             'timeout' => env('FLIGHT_PROVIDER_C_TIMEOUT', 2),
-        ]
-    ]
+        ],
+    ],
+    'cache' => [
+        'ttl' => env('FLIGHT_SEARCH_CACHE_TTL', 300),
+    ],
+    'booking_snapshot_ttl' => env('FLIGHT_BOOKING_SNAPSHOT_TTL', 300),
 ];
