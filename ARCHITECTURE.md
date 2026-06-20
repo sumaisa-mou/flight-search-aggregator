@@ -123,6 +123,18 @@ So the dedup step:
 
 That gives the user a clean list without hiding useful price differences.
 
+### Why dedup has its own output type
+
+`FlightDeduplicator` returns `DedupedFlight[]`, not `NormalizedFlight[]`. Each `DedupedFlight` is a `{ primary: NormalizedFlight, alternatives: AlternativeOffer[] }` pair.
+
+`alternatives` is a post-dedup concept — it does not exist at the provider layer. Putting it on `NormalizedFlight` would mean a field that starts empty and gets filled later, breaking immutability and forcing a `withAlternatives()` clone method. A separate type avoids both:
+
+```
+NormalizedFlight[]  →  FlightDeduplicator::dedupe  →  DedupedFlight[]
+```
+
+`FlightSnapshotStore` still works with `NormalizedFlight` — the snapshot is the primary only — so the search service extracts primaries before handing them in.
+
 ## Caching
 
 There are two cache uses here.
